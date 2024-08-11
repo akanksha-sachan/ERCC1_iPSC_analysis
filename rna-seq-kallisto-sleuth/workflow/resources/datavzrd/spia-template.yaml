@@ -1,0 +1,70 @@
+__use_yte__: true
+
+name: ?f"spia pathway impact analysis for model {wildcards.model}"
+datasets:
+  spia_table:
+    path: ?input.spia_table
+    offer-excel: ?params.offer_excel
+    separator: "\t"
+default-view: spia_table
+views:
+  spia_table:
+    dataset: spia_table
+    desc: |
+      ?f"spia pathway impact analysis for model {wildcards.model}"
+    page-size: 25
+    render-table:
+      columns:
+        Name:
+          display-mode: normal
+          link-to-url: 
+            pathway:
+              ?if params.pathway_db == "reactome":
+                url: "http://reactome.org/PathwayBrowser/#/{pathway id}"
+              ?elif params.pathway_db == "panther":
+                url: "https://www.pantherdb.org/pathway/pathwayDiagram.jsp?catAccession={pathway id}"
+              # we should add all the pathway databases that bioconductor-graphite enables (see its `pathwayDatabases()` function)
+              ?else: # not sure what a good fallback would be here
+                url: "http://reactome.org/PathwayBrowser/#/{pathway id}"
+        number of genes on the pathway:
+          plot:
+            heatmap:
+              scale: linear
+              range:
+                - "#F7F7F7"
+                - "#B2182B"
+        number of DE genes per pathway:
+          plot:
+            heatmap:
+              scale: linear
+              range:
+                - "#F7F7F7"
+                - "#B2182B"
+        p-value for at least NDE genes:
+          display-mode: detail
+        total perturbation accumulation:
+          plot:
+            heatmap:
+              scale: linear
+              range:
+                - "#B2182B"
+                - "#F7F7F7"
+                - "#2166AC"
+              domain-mid: 0
+        p-value to observe a total accumulation:
+          display-mode: detail
+        Combined p-value:
+          display-mode: detail
+        Combined FDR:
+          plot:
+            bars:
+              scale: linear
+        Combined Bonferroni p-values:
+          display-mode: detail     
+        Status:
+          plot:
+            heatmap:
+              scale: ordinal
+              color-scheme: accent
+        pathway id:
+          display-mode: detail
