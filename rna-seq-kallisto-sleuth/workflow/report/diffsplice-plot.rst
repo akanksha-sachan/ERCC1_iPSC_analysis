@@ -1,1 +1,0 @@
-Differential isoform usage and splicing of gene `{{ snakemake.wildcards.gene }} <https://www.ensembl.org/{{ snakemake.config["resources"]["ref"]["species"] }}/Gene/Summary?db=core;g={{ snakemake.wildcards.geneid }}>`_.

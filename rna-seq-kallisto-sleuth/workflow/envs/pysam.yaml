@@ -1,7 +1,0 @@
-channels:
-  - conda-forge
-  - bioconda
-  - nodefaults
-dependencies:
-  - pysam =0.21
-  - pandas =2.0

@@ -1,6 +1,0 @@
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  - bioconductor-biomart =2.58
-  - r-tidyverse =2.0
