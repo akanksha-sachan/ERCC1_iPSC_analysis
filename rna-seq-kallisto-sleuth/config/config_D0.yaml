@@ -1,5 +1,5 @@
-samples: config/samples.tsv
-units: config/units.tsv
+samples: config/samples_D0.tsv
+units: config/units_D0.tsv
 
 experiment:
   # If set to `true`, this option allows the workflow to analyse 3-prime RNA seq data obtained from Quantseq protocol by Lexogen.
@@ -58,8 +58,8 @@ diffexp:
       primary_variable: condition
       # base level of the primary variable (this should be one of the entries
       # in the primary_variable sample sheet column and will be considered as
-      # denominator in the fold change/effect size estimation).
-      base_level: WT_D0
+      # denominator in the fold change/effect size estimation). [Time-point extension - make list of strings to add multiple base levels, for different groups of conditions]
+      base_level: WT
   # significance level to use for volcano, ma- and qq-plots
   sig-level:
     volcano-plot: 0.05

@@ -1,7 +1,0 @@
-sample	condition	batch_effect
-A	KO_D0	S1
-B	WT_D0	S1
-C	KO_D0	S2
-D	WT_D0	S2
-E   KO_D0   S3 
-F   WT_D0   S3

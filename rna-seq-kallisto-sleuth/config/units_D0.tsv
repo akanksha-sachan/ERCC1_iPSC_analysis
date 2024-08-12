@@ -1,0 +1,7 @@
+sample	unit	fragment_len_mean	fragment_len_sd	fq1	fq2	bam_single	bam_paired
+A	1			/ocean/projects/cis240075p/asachan/datasets/iPSC_human_cells/bulk_RNA/raw_fastq/KO_D0_S1/KO_D0_S1_1.fq.gz	/ocean/projects/cis240075p/asachan/datasets/iPSC_human_cells/bulk_RNA/raw_fastq/KO_D0_S1/KO_D0_S1_2.fq.gz
+B	1			/ocean/projects/cis240075p/asachan/datasets/iPSC_human_cells/bulk_RNA/raw_fastq/WT_D0_S1/WT_D0_S1_1.fq.gz	/ocean/projects/cis240075p/asachan/datasets/iPSC_human_cells/bulk_RNA/raw_fastq/WT_D0_S1/WT_D0_S1_2.fq.gz
+C	1			/ocean/projects/cis240075p/asachan/datasets/iPSC_human_cells/bulk_RNA/raw_fastq/KO_D0_S2/KO_D0_S2_1.fq.gz	/ocean/projects/cis240075p/asachan/datasets/iPSC_human_cells/bulk_RNA/raw_fastq/KO_D0_S2/KO_D0_S2_2.fq.gz
+D	1			/ocean/projects/cis240075p/asachan/datasets/iPSC_human_cells/bulk_RNA/raw_fastq/WT_D0_S2/WT_D0_S2_1.fq.gz	/ocean/projects/cis240075p/asachan/datasets/iPSC_human_cells/bulk_RNA/raw_fastq/WT_D0_S2/WT_D0_S2_2.fq.gz
+E	1			/ocean/projects/cis240075p/asachan/datasets/iPSC_human_cells/bulk_RNA/raw_fastq/KO_D0_S3/KO_D0_S3_1.fq.gz	/ocean/projects/cis240075p/asachan/datasets/iPSC_human_cells/bulk_RNA/raw_fastq/KO_D0_S3/KO_D0_S3_2.fq.gz
+F	1			/ocean/projects/cis240075p/asachan/datasets/iPSC_human_cells/bulk_RNA/raw_fastq/WT_D0_S3/WT_D0_S3_1.fq.gz	/ocean/projects/cis240075p/asachan/datasets/iPSC_human_cells/bulk_RNA/raw_fastq/WT_D0_S3/WT_D0_S3_2.fq.gz
