@@ -1,0 +1,633 @@
+---
+title: "WGCNA_Pipeline_v2"
+author: "Computational Immunogenomics Core (CIG Core)"
+date: "2023-09-22"
+output: html_document
+---
+Made by Augusta Marie Vincent (CIG Core). 
+Updated 12/13/23
+
+A WGCNA pipeline using signed networks for the combined protist dataset, as previously used in "immpaper_vst". 
+
+```{r setup, include = FALSE}
+library(biomaRt)
+library(openxlsx)
+library(ggplot2)
+library(ggfortify)
+library(matrixStats)
+library(pheatmap)
+library(VennDiagram)
+library(stringr)
+library(ReactomePA)
+library(clusterProfiler)
+library(org.Mm.eg.db)
+library(AnnotationDbi)
+library(enrichplot)
+library(dplyr)
+library(WGCNA)
+library(GEOquery)
+library(sleuth)
+library(tidyverse)
+library(gridExtra)
+library(sva) #double check if you need this
+library(tximport)
+library(rhdf5)
+library(DESeq2)
+library(openxlsx)
+
+##User-defined parameters - change these to fit your project
+proj_path <- "/ix/cigcore/proj/hinterleitner" #project path
+result_path <- file.path(proj_path, "result", "2023_Phominis_mono_colonization","WGCNA","immpaper_signed")
+kalpath <- file.path(result_path, "mapped")
+GOI <- "" #Input here any genes you'd like to investigate after module creation
+factor <- "Protist" #replace with your treatment condition found in the Treatment column (i.e. not the control condition)
+
+excel_name <- "WGCNA_immpaper_signed.xlsx" #file path to give excel file
+RData_name <- "WGCNA_immpaper_signed.RData" #name and path to give RData (to save variables to disk)
+
+```
+
+```{r preproc1,include=FALSE}
+#read in metadata
+load("/ix/cigcore/proj/hinterleitner/result/2023_Phominis_mono_colonization/9-28-23_imm_paper_multifactor_DE/sleuth_results.RData")
+sampleTraits <- sleuth_result$sampleDF
+
+rm(sleuth_result)
+sampleTraits <- data.frame(sampleTraits) 
+
+sampleTraits <- sampleTraits[,-4]
+names(sampleTraits)[2] <- "Treatment"
+
+result_path <- file.path(proj_path, "result", "2023_Phominis_mono_colonization")
+
+kalpath <- file.path(result_path, "mapped")
+
+ex1_names <- c("CE_1","CE_2","CE_3","CE_4","CE_5","CE_6")
+
+
+files <- list.files(kalpath)
+
+sample_path <- file.path(kalpath,files,"abundance.h5")
+
+ex1_file <- tximport(sample_path,type="kallisto",txOut = TRUE)
+
+#save(ex1_file,file="ex1_file.Rdata")
+
+#
+kalpath <- file.path(proj_path,"result","immunity_paper","mapped")
+
+ex2_names <- c("LS1_S1","LS2_S2","LS3_S3","LS4_S4","LS10_S10","LS11_S11","LS12_S12","LS13_S13")
+
+files <- paste0(ex2_names,"_kallisto")
+
+sample_path <- file.path(kalpath,files,"abundance.h5")
+
+ex2_file <- tximport(sample_path,type="kallisto",txOut = TRUE)
+#save(ex2_file,file="ex2_file.Rdata")
+
+data_ex1 <- ex1_file$counts #use counts here actually
+data_ex2 <- ex2_file$counts
+
+colnames(data_ex1) <- ex1_names
+colnames(data_ex2) <- ex2_names
+
+data_ex1 <- data.frame(data_ex1)
+data_ex2 <- data.frame(data_ex2)
+
+data <- merge(data_ex1,data_ex2, by='row.names')
+
+rownames(data) <- data$Row.names
+
+data <- data[,-1] #remove the first column containing the transcript IDs, which we just assigned to row names
+
+```
+
+```{r preproc3,include=FALSE}
+#################
+rownames(data) <- tools::file_path_sans_ext(rownames(data)) #this just gets rid of the numbers after the period so we're left with only transcript IDs
+
+mart <- useMart("ensembl", dataset="mmusculus_gene_ensembl",host="https://jul2023.archive.ensembl.org") 
+
+lookup <- rownames(data) #all the transcript IDs I want to look up the gene ID for
+
+#a <- rownames(data) %in% ttg[,2] #boolean vector of 
+
+#data$include <- a
+ensemble2gene <- getBM(attributes=c("ensembl_transcript_id","external_gene_name","ensembl_gene_id"),
+                       filters = "ensembl_transcript_id",
+                       values = lookup, 
+                       uniqueRows = FALSE,
+                       mart = mart) #look up all my transcript IDs in the data to find the gene IDs
+
+a <- data[rownames(data) %in% ensemble2gene[,1],] #filter out transcript IDs that don't appear in ttg (there were about 2000)
+
+a$transcriptID <- rownames(a)
+b <- merge(a,ensemble2gene,by.x="transcriptID",by.y="ensembl_transcript_id")
+#data <- a
+
+b <- b[,-c(1,16)]
+
+#toSum <- b$ensembl
+
+aggData <- b %>% group_by(ensembl_gene_id) %>% summarise_each(funs(sum))
+
+aggData <- as.data.frame(aggData)
+#aggData <- aggregate(b, by=list(b$ensembl_gene_id), FUN=sum) #this should add up across all non-unique gene IDs, leaving us with gene raw counts
+
+rownames(aggData) <- aggData$ensembl_gene_id
+
+aggData <- aggData[,-1] #doing aggregate messes with our rownames and adds a column, so we rename the rows to that column and then delete the column
+
+data <- aggData
+
+
+gsg <- goodSamplesGenes(t(data), verbose = 3);
+data <- data[gsg$goodGenes==TRUE,]
+
+data <- data.frame(data)
+
+
+mod <- model.matrix(~as.factor(sampleTraits$Treatment),data=data)
+
+
+data <- ComBat(data, batch=sampleTraits$Experiment,mod=mod) #batch correction
+
+data <- ifelse(data < 0, 0, data) #batch correction leaves some counts at negative
+
+#deseq2 prep
+
+rownames(sampleTraits) <- sampleTraits[,1]
+all(rownames(sampleTraits) %in% colnames(data))
+
+sampleTraits <- arrange(sampleTraits, rownames(sampleTraits))
+data <- data[,c(1:6,11,12,13,14,7,8,9,10)] #to re-order the columns to match sampleTraits 
+
+all(rownames(sampleTraits) == colnames(data))
+
+# create dds
+dds <- DESeqDataSetFromMatrix(countData = round(data),
+                              colData = sampleTraits,
+                              design = ~ 1) # not spcifying model
+
+#remove genes with less than 15 counts across 90% of the samples 
+dds75 <- dds[rowSums(data >= 15) >= 12,]
+
+# perform variance stabilization
+dds75 <- vst(dds75)
+
+
+# get normalized counts
+data75 <- assay(dds75)
+
+
+
+```
+
+```{r genes-of-interest, echo=FALSE, include=FALSE}
+ttg <- getBM(attributes=c("ensembl_gene_id", "ensembl_transcript_id", "external_gene_name"), mart = mart) 
+
+if(GOI != "") #if GOI variable is not empty, proceed
+{
+#getting gene_name to ensembl ID matrix
+mart <- useMart("ensembl", dataset="mmusculus_gene_ensembl") 
+ttg <- getBM(attributes=c("ensembl_gene_id", "ensembl_transcript_id", "external_gene_name"), mart = mart) 
+
+#find genes of interest in ID matrix
+
+ID <- NULL
+i <- 0
+
+for (gene in GOI){
+  for (row in 1:nrow(ttg)){
+    if(grepl(gene,ttg[row,3],fixed=TRUE)==TRUE){
+      i <- i+1
+      ID[i] <- ttg[row,1]
+    }
+  }
+}
+
+ID <- unique(ID)
+### Checking if our genes of interest match our cutoffs
+ 
+goi_data <- data75[ID,]
+goi_data
+
+}
+
+```
+Counts are taken on a gene-wise basis. Then, following recommendations by the authors of WGCNA, genes are filtered based on counts across 90% of the samples. We finally do variance stabilization using DESeq2. 
+
+```{r soft-power-selection,echo=FALSE}
+#soft power thresholds to test
+powers = c(c(1:10), seq(from = 12, to=50, by=2))
+
+# Call the network topology analysis function
+sft = pickSoftThreshold(t(data75), networkType="signed", powerVector = powers, verbose = 5)
+
+sft.data <- sft$fitIndices
+
+a1 <- ggplot(sft.data, aes(Power, SFT.R.sq, label = Power)) +
+  geom_point() +
+  geom_text(nudge_y = 0.1) +
+  geom_hline(yintercept = 0.8, color = 'red') +
+  labs(x = 'Power', y = 'Scale free topology model fit, signed R^2') +
+  theme_classic()
+a2 <- ggplot(sft.data, aes(Power, mean.k., label = Power)) +
+  geom_point() +
+  geom_text(nudge_y = 0.1) +
+  labs(x = 'Power', y = 'Mean Connectivity') +
+  theme_classic()
+
+grid.arrange(a1,a2)
+#
+#
+###Change to preferred soft power value after inspecting plot###
+softpower <- 24
+```
+
+Soft-power is an input for the module creation. It is a power that all gene-gene correlations are raised to. Our goal is to choose a value in the top chart close to the red line and before diminishing returns. 
+
+```{r clustering-and-denrogram,echo=FALSE}
+net = blockwiseModules(t(data75),
+                        maxBlockSize = nrow(data75)+50, 
+                        corType = "bicor",
+                        TOMType = "signed",
+                        networkType = "signed",
+                        power = softpower,
+                        mergeCutHeight = 0.25,
+                        numericLabels = FALSE,
+                        randomSeed = 1234,
+                        verbose = 0)
+plotDendroAndColors(net$dendrograms[[1]], cbind(net$unmergedColors, net$colors),
+                    c("unmerged", "merged"),
+                    dendroLabels = FALSE,
+                    addGuide = TRUE,
+                    hang= 0.03,
+                    guideHang = 0.05,
+                    verbose=0)
+save(net, file=file.path(proj_path,"testnet.RData")) #save net file - network construction takes forever so definitely save this 
+save.image(file="/ix/cigcore/proj/hinterleitner/code/Augusta/2023_Phominis_mono_colonization/WGCNA/immpaper_signed/TEST_WGCNA_immpaper_signed.RData")
+```
+This is a dendogram. Each "branch" (black descending line) represents a gene. The futher down on the Y-axis you go, the more similar genes are, and those genes get sorted into modules together. The dendogram is a bit hard to parse given the number of genes involved but I include it for your reference. 
+
+```{r table,echo=FALSE}
+module_eigengenes <- net$MEs
+
+table(net$colors)
+
+```
+Here are gene counts for each of the modules. 
+
+```{r heatmap-setup, include=FALSE}
+nGenes <- nrow(data75)
+nSamples <- ncol(data75)
+
+MEs0 <- moduleEigengenes(t(data75),net$colors)$eigengenes #calculate module eigengenes
+MEs <- orderMEs(MEs0) 
+
+sampleTraits <- sampleTraits[,-1] #remove sample name column, already in rownames
+sampleTraits$Treatment <- ifelse(sampleTraits$Treatment == factor,1,0) #binarize factors
+
+#moduleTraitCor <-  WGCNA::cor(MEs, sampleTraits, use = "p")
+
+MEmat <- as.matrix(MEs) #need matrix to do LM
+
+#Multiple regression with Module Eigengene expression as dependent variable, our sample traits as independent variables. 
+moduleTraitCor <- WGCNA::cor(MEs, sampleTraits, use = "p")
+moduleTraitPvalue <- corPvalueStudent(moduleTraitCor, nSamples) 
+
+rm(color) #remove color as an iterator from the last loop
+#grab elements from list
+
+sizeGrWindow(10,6)
+# Will display correlations and their p-values
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",
+                   signif(moduleTraitPvalue, 1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor)
+par(mar = c(6, 8.5, 3, 3));
+
+```
+
+```{r heatmap2, echo=FALSE, fig.height=17}
+# Display the correlation values within a heatmap plot
+labeledHeatmap(Matrix = moduleTraitCor,
+               xLabels = names(sampleTraits),
+               yLabels = names(MEs),
+               ySymbols = names(MEs),
+               colorLabels = FALSE,
+               colors = blueWhiteRed(50),
+               invertColors=TRUE,
+               textMatrix = textMatrix,
+               setStdMargins = FALSE,
+               cex.text = 1,
+               zlim = c(-1,1),
+               main = paste("Module-trait relationships"))
+```
+This is a heatmap. Correlation values appear in each block, with p-values in parantheses underneath.
+
+Module eigengenes are not real genes, but abstractions of the expression profile of a module in relation to your samples. Several modules are not correlated with treatment. Recall the grey module contains genes that do not cluster together, so it is best to ignore those results in the context of WGCNA. 
+
+Here, red represents negative correlations and blue represents positive correlations. 
+
+```{r genes-of-interest-modules, echo=FALSE}
+module.gene.mapping <- as.data.frame(net$colors)
+
+
+module.membership.measure <- WGCNA::cor(module_eigengenes, t(data75), use = 'p')
+module.membership.measure.pvals <- corPvalueStudent(module.membership.measure, nSamples) 
+
+module.membership.measure <- t(module.membership.measure)
+module.membership.measure.pvals <- t(module.membership.measure.pvals)
+
+gene.signf.corr <- cor(t(data75), sampleTraits$Treatment, use = 'p')
+gene.signf.corr.pvals <- corPvalueStudent(gene.signf.corr, nSamples)
+
+if(GOI != "") #if GOI variable is not empty, proceed
+{
+  goi_gene_significance <-  gene.signf.corr.pvals[rownames(gene.signf.corr.pvals) %in% ID,]
+  goi_gene_corr <- gene.signf.corr[rownames(gene.signf.corr) %in% ID,]
+
+  goi_membership <- module.gene.mapping[rownames(module.gene.mapping) %in% ID,] 
+
+  goi_membership <- as.data.frame(goi_membership)
+
+  goi_membership$p <- goi_gene_significance
+  goi_membership$cor <- goi_gene_corr
+  goi_membership$names <- GOI
+  goi_membership
+}
+
+```
+
+```{r moduleList,echo=FALSE,fig.width=15, fig.height=12}
+moduleList <- c() #initialize moduleList list
+moduleORAList <- c()
+colors <- unique(net$colors) #get character vector of all colors 
+ #get character vector of all colors 
+
+
+for(color in colors){ #for each module in all the modules
+  colname <- paste("ME",color,sep="")
+  
+  module.gene.mapping$gene <- rownames(module.gene.mapping) #assign rownames to a column called gene (ensembl gene ID)
+  
+  mod <- module.gene.mapping[module.gene.mapping$`net$colors`==color,] #get genes in a particular color module
+  
+  modp <- module.membership.measure.pvals[rownames(module.membership.measure.pvals) %in% mod$gene,] #module membership p value per gene
+  modcor <- module.membership.measure[rownames(module.membership.measure) %in% mod$gene,] #module membership correlation value per gene
+  
+  mod$p <- modp[,colname] #selecting just the module the gene was assigned to 
+  mod$cor <- modcor[,colname]
+  
+  mod_names <- ttg[ttg$ensembl_gene_id %in% mod$gene,] #
+  #as.data.frame(module.gene.mapping[module.gene.mapping$`net$colors`=="mod",])
+  
+  mod_names <- mod_names[,-2] #remove transcript ID column
+  mod_names <- unique(mod_names)
+  
+  mod <- merge(mod,mod_names,by.x="gene",by.y="ensembl_gene_id")
+  #GSEA set-up - make gene list
+  
+  mod_ORA <- mod$cor
+  
+  names(mod_ORA) <- mod$external_gene_name
+  
+  mod_ORA <- sort(mod_ORA,decreasing=TRUE)
+  
+  mod_entrez <- bitr(names(mod_ORA), fromType = "SYMBOL", toType = "ENTREZID", OrgDb = "org.Mm.eg.db")
+  
+  names(mod_ORA) <- mod_entrez$ENTREZID
+  
+  moduleORAList[[color]] <- mod_ORA #store named vectors in a big list
+  moduleList[[color]] <- mod
+  
+}
+
+#save module dataframes to excel 
+
+# x <- 0
+# OUT <- createWorkbook()
+# for(module in moduleList){
+# x <- x+1
+# colorName <- names(moduleList)[x]
+# addWorksheet(OUT,colorName)
+# openxlsx::writeData(OUT, sheet=colorName, x=module)
+# }
+
+# 
+# save.image(file=RData_name) #saving image again for redundancy
+# Export the file
+#saveWorkbook(OUT, excel_name)
+
+```
+
+The above code chunk writes module-membership gene lists (with correlation to module eigengene expression with p-value) to an excel file. 
+```{r, include=FALSE, echo=FALSE, warning=FALSE, message=FALSE}
+
+
+rm(color)
+
+colors <- c("magenta","darkred","lightyellow","salmon","black","lightgreen","greenyellow","lightcyan","brown")
+#initialize variables that will hold pathway analysis results
+GSEA_reac <- c()
+GSEA_kegg <- c()
+ORA_reac <- c()
+ORA_kegg <- c()
+
+GSEA_reac_fit <- c() 
+ORA_reac_fit <- c()
+GSEA_kegg_fit <- c()
+ORA_kegg_fit <- c()
+
+x <- 0 #initalize iterator
+###
+#This part runs pathway analyses (GSEA and ORA) for all modules that have less than 1000 genes. It contains try() statements in case a pathway analysis fails due to lack of enriched pathways. Normally, if a pathway analysis fails and doesn't find enriched pathways, an error is thrown for failure to plot the pathways. It is necessary to skip over these errors to automate the process without experimenter input. 
+###
+for(color in moduleORAList){ #get named vector 
+  x <- x+1 #iterate (for color name)
+  colorName <- names(moduleORAList)[x] #grab name of color
+  mod_ORA <- color #grab named vector 
+  if(colorName %in% colors){ #find modules with less than 1,000 genes
+
+  #run GSEA/ORA for each 
+  ##RUN GSEA 
+  
+  reactome <- gsePathway(gene = mod_ORA, organism = "mouse",pvalueCutoff=.1)
+
+  reactome2 <- setReadable(reactome, OrgDb = "org.Mm.eg.db", keyType="ENTREZID")
+
+  GSEA_reac[[colorName]] <- reactome2
+
+  try(GSEA_reac_fit[[colorName]] <- plot(dotplot(reactome, showCategory = 10,title=paste0(colorName," GSEA - reactome"))))
+
+  kegg <- gseKEGG(gene = mod_ORA, organism = "mmu", use_internal_data = FALSE,pvalueCutoff=.1)
+  kegg2 <- setReadable(kegg, OrgDb = "org.Mm.eg.db", keyType="ENTREZID")
+
+  GSEA_kegg[[colorName]] <- kegg2
+
+  try(GSEA_kegg_fit[[colorName]] <- plot(dotplot(kegg, showCategory = 10, title=paste0(colorName," GSEA - KEGG"))))
+
+  ##RUN ORA
+  
+  mod_reactome_ORA <- enrichPathway(gene = names(mod_ORA), organism = "mouse", pvalueCutoff=.1, readable=TRUE)
+  
+  ORA_reac[[colorName]] <- mod_reactome_ORA
+  try(ORA_reac_fit[[colorName]] <- plot(dotplot(mod_reactome_ORA, showCategory = 20,title=paste0(colorName," ORA - Reactome"))))
+
+  mod_kegg_ORA <- enrichKEGG(gene = names(mod_ORA), organism = "mmu",  pvalueCutoff=.1, use_internal_data = FALSE)
+  
+  mod_kegg_ORA2 <- setReadable(mod_kegg_ORA, OrgDb = "org.Mm.eg.db", keyType="ENTREZID")
+  
+  ORA_kegg[[colorName]] <- mod_kegg_ORA2
+  mod_kegg_ORA@result$Description <- gsub(pattern = " - Mus musculus (house mouse)", replacement = "", mod_kegg_ORA@result$Description, fixed = T)    
+  
+  try(ORA_kegg_fit[[colorName]] <- plot(dotplot(mod_kegg_ORA, showCategory = 20,title=paste0(colorName," ORA - KEGG"))))
+  }
+  
+}
+
+
+#save.image(file=RData_name) #saving image again for redundancy
+```
+
+The above code chunk does pathway analysis for all modules which correlate with Treatment at p < .1.  
+
+```{r up-module-ORA,include=FALSE, echo=FALSE, warning=FALSE, message=FALSE}
+upmod <- rbind(moduleList[["darkred"]],moduleList[["lightyellow"]],moduleList[["salmon"]],moduleList[["black"]],moduleList[["lightgreen"]],moduleList[["brown"]])
+
+upmod_ORA <- c(moduleORAList[["brown"]],moduleORAList[["darkred"]],moduleORAList[["lightyellow"]],moduleORAList[["salmon"]],moduleORAList[["black"]],moduleORAList[["lightgreen"]])
+
+mod_ORA <- upmod_ORA
+mod_ORA <- sort(mod_ORA,decreasing=TRUE)
+
+colorName <- "upmod"
+ reactome <- gsePathway(gene = mod_ORA, organism = "mouse",pvalueCutoff=.1)
+  
+  reactome2 <- setReadable(reactome, OrgDb = "org.Mm.eg.db", keyType="ENTREZID")
+  
+  GSEA_reac[[colorName]] <- reactome2
+  
+  try(GSEA_reac_fit[[colorName]] <- plot(dotplot(reactome, showCategory = 10,title=paste0(colorName," GSEA - reactome"))))
+
+  kegg <- gseKEGG(gene = mod_ORA, organism = "mmu", use_internal_data = FALSE,pvalueCutoff=.1) 
+  kegg2 <- setReadable(kegg, OrgDb = "org.Mm.eg.db", keyType="ENTREZID")
+  
+  GSEA_kegg[[colorName]] <- kegg2
+  
+  try(GSEA_kegg_fit[[colorName]] <- plot(dotplot(kegg, showCategory = 10, title=paste0(colorName," GSEA - KEGG"))))
+  
+  ##RUN ORA
+  
+  mod_reactome_ORA <- enrichPathway(gene = names(mod_ORA), organism = "mouse", pvalueCutoff=.1, readable=TRUE)
+  
+  ORA_reac[[colorName]] <- mod_reactome_ORA
+  try(ORA_reac_fit[[colorName]] <- plot(dotplot(mod_reactome_ORA, showCategory = 20,title=paste0(colorName," ORA - Reactome"))))
+
+  mod_kegg_ORA <- enrichKEGG(gene = names(mod_ORA), organism = "mmu",  pvalueCutoff=.1, use_internal_data = FALSE)
+  
+  mod_kegg_ORA2 <- setReadable(kegg, OrgDb = "org.Mm.eg.db", keyType="ENTREZID")
+  
+  ORA_kegg[[colorName]] <- mod_kegg_ORA2
+  mod_kegg_ORA@result$Description <- gsub(pattern = " - Mus musculus (house mouse)", replacement = "", mod_kegg_ORA@result$Description, fixed = T)    
+  
+  try(ORA_kegg_fit[[colorName]] <- plot(dotplot(mod_kegg_ORA, showCategory = 20,title=paste0(colorName," ORA - KEGG"))))
+```
+
+```{r down-module-ORA,include=FALSE, echo=FALSE, warning=FALSE, message=FALSE}
+downmod <- rbind(moduleList[["lightcyan"]],moduleList[["greenyellow"]],moduleList[["magenta"]])
+
+downmod_ORA <- c(moduleORAList[["lightcyan"]],moduleORAList[["greenyellow"]],moduleORAList[["magenta"]])
+
+mod_ORA <- downmod_ORA
+mod_ORA <- sort(mod_ORA,decreasing=TRUE)
+
+colorName <- "downmod"
+ reactome <- gsePathway(gene = mod_ORA, organism = "mouse",pvalueCutoff=.1)
+  
+  reactome2 <- setReadable(reactome, OrgDb = "org.Mm.eg.db", keyType="ENTREZID")
+  
+  GSEA_reac[[colorName]] <- reactome2
+  
+  try(GSEA_reac_fit[[colorName]] <- plot(dotplot(reactome, showCategory = 10,title=paste0(colorName," GSEA - reactome"))))
+
+  kegg <- gseKEGG(gene = mod_ORA, organism = "mmu", use_internal_data = FALSE,pvalueCutoff=.1) 
+  kegg2 <- setReadable(kegg, OrgDb = "org.Mm.eg.db", keyType="ENTREZID")
+  
+  GSEA_kegg[[colorName]] <- kegg2
+  
+  try(GSEA_kegg_fit[[colorName]] <- plot(dotplot(kegg, showCategory = 10, title=paste0(colorName," GSEA - KEGG"))))
+  
+  ##RUN ORA
+  
+  mod_reactome_ORA <- enrichPathway(gene = names(mod_ORA), organism = "mouse", pvalueCutoff=.1, readable=TRUE)
+  
+  ORA_reac[[colorName]] <- mod_reactome_ORA
+  try(ORA_reac_fit[[colorName]] <- plot(dotplot(mod_reactome_ORA, showCategory = 20,title=paste0(colorName," ORA - Reactome"))))
+
+  mod_kegg_ORA <- enrichKEGG(gene = names(mod_ORA), organism = "mmu",  pvalueCutoff=.1, use_internal_data = FALSE)
+  
+  mod_kegg_ORA2 <- setReadable(kegg, OrgDb = "org.Mm.eg.db", keyType="ENTREZID")
+  
+  ORA_kegg[[colorName]] <- mod_kegg_ORA2
+  mod_kegg_ORA@result$Description <- gsub(pattern = " - Mus musculus (house mouse)", replacement = "", mod_kegg_ORA@result$Description, fixed = T)    
+  
+  try(ORA_kegg_fit[[colorName]] <- plot(dotplot(mod_kegg_ORA, showCategory = 20,title=paste0(colorName," ORA - KEGG"))))
+  
+  #save module dataframes to excel 
+
+x <- 0
+OUT <- createWorkbook()
+for(module in ORA_kegg){
+x <- x+1
+colorName <- names(ORA_kegg)[x]
+writeData <- (ORA_kegg[[colorName]]@result)
+addWorksheet(OUT,colorName)
+openxlsx::writeData(OUT, sheet=colorName, x=writeData)
+}
+# Export the file
+saveWorkbook(OUT, "/ix/cigcore/proj/hinterleitner/result/2023_Phominis_mono_colonization/WGCNA/immpaper_signed/ORA_KEGG_details.xlsx")
+
+x <- 0
+OUT <- createWorkbook()
+for(module in ORA_reac){
+x <- x+1
+colorName <- names(ORA_reac)[x]
+writeData <- (ORA_reac[[colorName]]@result)
+addWorksheet(OUT,colorName)
+openxlsx::writeData(OUT, sheet=colorName, x=writeData)
+}
+# Export the file
+saveWorkbook(OUT, "/ix/cigcore/proj/hinterleitner/result/2023_Phominis_mono_colonization/WGCNA/immpaper_signed/ORA_reac_details.xlsx")
+```
+
+
+```{r, fig.height=10}
+for(plot in ORA_kegg_fit){
+  plot(plot)
+}
+
+for(plot in ORA_reac_fit){
+  plot(plot)
+}
+```
+
+
+```{r GSEA_plots,echo=FALSE, warning=FALSE, message=FALSE, fig.height=10}
+for(plot in GSEA_kegg_fit){
+  plot(plot)
+}
+
+for(plot in GSEA_reac_fit){
+  plot(plot)
+}
+```
+WGCNA_TrIP.xlsx contains module-membership p-values and correlations for each gene within a module. 
+
+Trip WGCNA.pptx contains pathway analysis results. 
+
+For reproducability purposes, session info (including packages used and version numbers) is included below.
+
+```{r}
+sessionInfo() #write this to text file instead
+
+```
