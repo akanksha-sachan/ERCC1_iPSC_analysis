@@ -1,10 +1,11 @@
 import os
 import sys
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import scienceplots
+from statannotations import Annotator
 
 def calculate_senescence_score(data, up_genes=None, down_genes=None):
     """
@@ -83,6 +84,18 @@ def map_sample_to_category(sample_name):
 
 ################### PLotting ###################
 
+# Set global style parameters
+plt.style.use(['science', 'no-latex'])  # Requires SciencePlots package
+plt.rcParams.update({
+    'font.family': 'Arial',
+    'font.size': 9,
+    'axes.spines.top': False,
+    'axes.spines.right': False,
+    'axes.linewidth': 0.8,
+    'figure.dpi': 300,
+    'figure.figsize': (6, 4)  # More compact size
+})
+sns.set_theme(context="paper", style="ticks", palette="deep")
 
 def plot_scores_scatter(scores_df, category_colors, title=None, ylabel=None):
     """
@@ -121,7 +134,6 @@ def plot_scores_scatter(scores_df, category_colors, title=None, ylabel=None):
     plt.tight_layout()
     plt.show()
 
-
 def permutation_test(group1, group2, n_permutations=10000):
     """
     Perform a permutation test to compute p-value for the difference between two groups.
@@ -153,95 +165,107 @@ def permutation_test(group1, group2, n_permutations=10000):
     p_value = np.mean(np.abs(null_diffs) >= np.abs(observed_diff))
     return observed_diff, p_value, null_diffs
 
-
-def plot_scores_with_significance(
-    scores_df, category_colors, title=None, ylabel=None, n_permutations=1000
-):
+def plot_scores_simple(scores_df, category_colors, title=None, ylabel=None):
     """
-    Plot scores with significance annotations
+    Plot boxplot with swarmplot overlay in Prism-style formatting
     """
-    from scipy.stats import ttest_ind
-    plt.figure(figsize=(12, 8))
-    # Create box plot
+    plt.figure(figsize=(6, 4))  # Controlled by rcParams but explicit here
+    # Create plot with updated aesthetics
     ax = sns.boxplot(
         x="category",
         y="senescence_score",
         data=scores_df,
         palette=category_colors,
-        width=0.5,
+        width=0.6,
+        linewidth=0.7,
+        fliersize=0  # Hide default outliers
     )
+    # Add individual points with improved styling
     sns.swarmplot(
-        x="category", y="senescence_score", data=scores_df, color="0.2", alpha=0.6
+        x="category", 
+        y="senescence_score", 
+        data=scores_df,
+        color=".2",  # Dark gray
+        size=3.5,
+        alpha=0.8,
+        edgecolor="none"
     )
-    # Pairwise comparisons for significance
-    categories = scores_df["category"].unique()
+    # Add horizontal grid lines
+    ax.yaxis.grid(True, linestyle='--', alpha=0.4)
+    ax.set_axisbelow(True)
+    # Customize plot elements
+    plt.title(title if title else "Scores by Category", 
+             fontsize=11, pad=10)
+    plt.ylabel(ylabel if ylabel else "Score", 
+              fontsize=10, labelpad=8)
+    plt.xlabel("")  # Remove x-axis label
+    # Rotate x-ticks and adjust alignment
+    plt.xticks(rotation=35, ha='right', rotation_mode='anchor')
+    # Clean up borders
+    sns.despine(offset=5, trim=True)
+    # Adjust layout with tight margins
+    plt.tight_layout(pad=1.5)
+    plt.show()
+
+# Update your significance plotting function with statannotations
+def plot_scores_with_significance(
+    scores_df, category_colors, title=None, ylabel=None, n_permutations=1000
+):
+    """
+    Plot scores with Prism-style significance annotations
+    """
+    plt.figure(figsize=(6, 4))
+    # Create base plot
+    ax = sns.boxplot(
+        x="category",
+        y="senescence_score",
+        data=scores_df,
+        palette=category_colors,
+        width=0.6,
+        linewidth=0.7
+    )
+    # Add swarmplot
+    sns.swarmplot(
+        x="category", 
+        y="senescence_score", 
+        data=scores_df,
+        color=".2",
+        size=3.5,
+        alpha=0.8
+    )
+    # Configure annotations
     pairs = [
         ("Ctrl Low-Fat diet", "Trf2 KO Low-Fat diet"),
         ("Ctrl Western diet", "Trf2 KO Western diet"),
         ("Ctrl Low-Fat diet", "Ctrl Western diet"),
         ("Trf2 KO Low-Fat diet", "Trf2 KO Western diet"),
     ]
-    y_max = scores_df["senescence_score"].max()
-    y_min = scores_df["senescence_score"].min()
-    y_range = y_max - y_min
-    for i, (cat1, cat2) in enumerate(pairs):
-        if cat1 in categories and cat2 in categories:
-            group1 = scores_df[scores_df["category"] == cat1]["senescence_score"]
-            group2 = scores_df[scores_df["category"] == cat2]["senescence_score"]
-            # Perform t-test
-            _, p_value = ttest_ind(group1, group2)
-            # Calculate y position
-            x1 = list(categories).index(cat1)
-            x2 = list(categories).index(cat2)
-            y = y_max + (i + 1) * (y_range * 0.1)
-            # Add significance annotation
-            plt.plot(
-                [x1, x1, x2, x2],
-                [y, y + y_range * 0.02, y + y_range * 0.02, y],
-                color="black",
-                lw=1,
-            )
-            sig = (
-                "***"
-                if p_value < 0.001
-                else ("**" if p_value < 0.01 else ("*" if p_value < 0.05 else "ns"))
-            )
-            plt.text(
-                (x1 + x2) / 2,
-                y + y_range * 0.02,
-                f"{sig}\np={p_value:.3f}",
-                ha="center",
-                va="bottom",
-            )
-    # Customize plot
-    plt.title(title if title else "Scores by Category")
-    plt.ylabel(ylabel if ylabel else "Score")
-    plt.xticks(rotation=45, ha="right")
-    plt.ylim(y_min - y_range * 0.3, y_max + y_range * 0.5)
-    plt.tight_layout()
-    plt.show()
-
-def plot_scores_simple(scores_df, category_colors, title=None, ylabel=None):
-    """
-    Plot boxplot with swarmplot overlay without significance testing
-    """
-    plt.figure(figsize=(12, 8))
-    # Create box plot with swarm plot overlay
-    ax = sns.boxplot(
+    # Set up statistical annotations
+    annotator = Annotator(
+        ax=ax,
+        pairs=pairs,
+        data=scores_df,
         x="category",
         y="senescence_score",
-        data=scores_df,
-        palette=category_colors,
-        width=0.5,
+        order=scores_df['category'].unique()
     )
-    # Add individual points
-    sns.swarmplot(
-        x="category", y="senescence_score", data=scores_df, color="0.2", alpha=0.6
+    # Configure annotation style
+    annotator.configure(
+        text_format='star', 
+        loc='outside',
+        line_height=0.02,
+        line_offset=0.1,
+        text_offset=1.5,
+        fontsize=9,
+        line_width=0.7
     )
-    # Customize plot
-    plt.title(title if title else "Scores by Category")
-    plt.ylabel(ylabel if ylabel else "Score")
-    plt.xticks(rotation=45, ha="right")
-    # Adjust layout
-    plt.tight_layout()
+    # Add annotations
+    annotator.apply_and_annotate()
+    # Final styling
+    plt.title(title if title else "Scores by Category", fontsize=11)
+    plt.ylabel(ylabel if ylabel else "Score", fontsize=10)
+    plt.xlabel("")
+    plt.xticks(rotation=35, ha='right')
+    sns.despine(offset=5, trim=True)
+    plt.tight_layout(pad=1.5)
     plt.show()
