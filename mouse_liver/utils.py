@@ -81,6 +81,88 @@ def map_sample_to_category(sample_name):
         return "Trf2 KO Western diet"
     return None
 
+def permutation_test(group1, group2, n_permutations=10000):
+    """
+    Perform a permutation test to compute p-value for the difference between two groups.
+
+    Parameters:
+    -----------
+    group1, group2 : array-like
+        The scores for the two groups being compared.
+    n_permutations : int, optional
+        Number of permutations to generate the null distribution.
+
+    Returns:
+    --------
+    observed_diff : float
+        The observed mean difference between the groups.
+    p_value : float
+        The p-value based on the permutation test.
+    """
+    from scipy.stats import ttest_ind
+    observed_diff = np.mean(group1) - np.mean(group2)
+    combined = np.concatenate([group1, group2])
+    null_diffs = []
+    for _ in range(n_permutations):
+        np.random.shuffle(combined)
+        perm_group1 = combined[: len(group1)]
+        perm_group2 = combined[len(group1) :]
+        null_diffs.append(np.mean(perm_group1) - np.mean(perm_group2))
+    null_diffs = np.array(null_diffs)
+    p_value = np.mean(np.abs(null_diffs) >= np.abs(observed_diff))
+    return observed_diff, p_value, null_diffs
+
+def calculate_pairwise_significance(data, groups):
+    """
+    Calculate pairwise significance between all groups
+    Returns a dictionary of p-values and significance levels
+    """
+    from scipy import stats
+    results = {}
+    for i in range(len(groups)):
+        for j in range(i + 1, len(groups)):
+            group1 = data[data['category'] == groups[i]]['senescence_score']
+            group2 = data[data['category'] == groups[j]]['senescence_score']
+            
+            # Perform Mann-Whitney U test
+            statistic, pvalue = stats.mannwhitneyu(group1, group2, alternative='two-sided')
+            
+            # Add significance stars
+            if pvalue < 0.001:
+                sig = '***'
+            elif pvalue < 0.01:
+                sig = '**'
+            elif pvalue < 0.05:
+                sig = '*'
+            else:
+                sig = 'ns'
+                
+            results[(i, j)] = {'p-value': pvalue, 'significance': sig}
+    
+    return results
+
+def create_overlap_data(genesets):
+    names = list(genesets.keys())
+    percent_matrix = pd.DataFrame(0.0, index=names, columns=names)
+    count_matrix = pd.DataFrame(0, index=names, columns=names)
+    
+    for i, name1 in enumerate(names):
+        for j, name2 in enumerate(names):
+            # Skip diagonal and lower triangle
+            if i >= j:
+                continue
+                
+            set1 = set(genesets[name1])
+            set2 = set(genesets[name2])
+            
+            intersection = len(set1.intersection(set2))
+            min_size = min(len(set1), len(set2))
+            
+            # Store both percentage and count
+            percent_matrix.loc[name1, name2] = (intersection / min_size * 100) if min_size > 0 else 0
+            count_matrix.loc[name1, name2] = intersection
+    
+    return percent_matrix, count_matrix
 
 ################### PLotting ###################
 
@@ -133,37 +215,6 @@ def plot_scores_scatter(scores_df, category_colors, title=None, ylabel=None):
     plt.xticks([])
     plt.tight_layout()
     plt.show()
-
-def permutation_test(group1, group2, n_permutations=10000):
-    """
-    Perform a permutation test to compute p-value for the difference between two groups.
-
-    Parameters:
-    -----------
-    group1, group2 : array-like
-        The scores for the two groups being compared.
-    n_permutations : int, optional
-        Number of permutations to generate the null distribution.
-
-    Returns:
-    --------
-    observed_diff : float
-        The observed mean difference between the groups.
-    p_value : float
-        The p-value based on the permutation test.
-    """
-    from scipy.stats import ttest_ind
-    observed_diff = np.mean(group1) - np.mean(group2)
-    combined = np.concatenate([group1, group2])
-    null_diffs = []
-    for _ in range(n_permutations):
-        np.random.shuffle(combined)
-        perm_group1 = combined[: len(group1)]
-        perm_group2 = combined[len(group1) :]
-        null_diffs.append(np.mean(perm_group1) - np.mean(perm_group2))
-    null_diffs = np.array(null_diffs)
-    p_value = np.mean(np.abs(null_diffs) >= np.abs(observed_diff))
-    return observed_diff, p_value, null_diffs
 
 def plot_scores_simple(scores_df, category_colors, title=None, ylabel=None):
     """
@@ -269,3 +320,201 @@ def plot_scores_with_significance(
     sns.despine(offset=5, trim=True)
     plt.tight_layout(pad=1.5)
     plt.show()
+
+def plot_violin_box_combo(data, x_var, y_var, title=None, x_ticks=None, palette=None):
+    """
+    Create a combined violin-box plot with consistent colors for all elements
+    """
+    plt.clf()
+    # Reduce figure width and adjust spacing
+    fig, ax = plt.subplots(figsize=(5, 6))
+    
+    # Adjust plot margins
+    plt.subplots_adjust(left=0.15, right=0.85, bottom=0.1, top=0.9)
+
+    # Calculate y-axis limits based on data
+    y_min = data[y_var].min()
+    y_max = data[y_var].max()
+    
+    # Add padding and round to nearest 0.5
+    y_min = np.floor(y_min * 2) / 2
+    y_max = np.ceil(y_max * 2) / 2
+    
+    # Set y-axis limits and ticks
+    ax.set_ylim(y_min, y_max)
+    ax.yaxis.set_major_locator(plt.MultipleLocator(0.5))  # Set tick intervals to 0.5
+
+    # Create violin plot in the background
+    violin = sns.violinplot(
+        data=data, x=x_var, y=y_var,
+        palette=palette, inner=None,
+        linewidth=0, saturation=1.0,
+        alpha=0.3, width=0.4, cut=0
+    )
+
+    # Get the unique categories in the order they appear
+    categories = data[x_var].unique()
+
+    # Create box plot with correct colors from the start
+    box_plot = sns.boxplot(
+        data=data, x=x_var, y=y_var,
+        width=0.4, linewidth=1.2,
+        flierprops={'marker': ' '},
+        showmeans=False,
+        boxprops={
+            'facecolor': 'none',
+            'edgecolor': 'none'
+        },
+        whiskerprops={'color': 'none'},
+        medianprops={'color': 'none'},
+        showcaps=False,
+        ax=ax
+    )
+
+    # Count number of boxes and lines per box
+    num_boxes = len(categories)
+    lines_per_box = len(ax.lines) // num_boxes
+
+    # Update box plot colors after creation
+    for i, (name, box) in enumerate(zip(categories, ax.patches)):
+        color = palette[name]
+        
+        # Create filled box with transparency
+        box.set_facecolor(color)
+        box.set_edgecolor('none')
+        box.set_alpha(0.3)
+        box.set_zorder(1)
+        
+        # Create box edges with full opacity
+        import matplotlib.patches as mpatches
+        path = box.get_path()
+        edges = mpatches.PathPatch(
+            path,
+            facecolor='none',
+            edgecolor=color,
+            linewidth=1.2,
+            alpha=1.0,
+            zorder=2
+        )
+        ax.add_patch(edges)
+        
+        # Get and color all lines for this box
+        box_lines = ax.lines[i * lines_per_box : (i + 1) * lines_per_box]
+        for line in box_lines:
+            line.set_color(color)
+            line.set_alpha(1.0)
+            line.set_linewidth(1.2)
+            line.set_zorder(2)
+
+    # Add individual points on top
+    sns.stripplot(
+        data=data, x=x_var, y=y_var,
+        palette=palette, size=6,
+        alpha=1.0, linewidth=0,
+        jitter=0.2, zorder=3
+    )
+    
+    # Calculate significance
+    categories = data[x_var].unique()
+    significance_info = calculate_pairwise_significance(data, categories)
+
+    # Add significance bar
+    def add_significance_bar(start, end, height, p_value, sig_symbol):
+        bar_height = height
+        bar_tips = 0.05
+        
+        # Draw the bar
+        ax.plot([start, start, end, end], 
+                [bar_height, bar_height + bar_tips, bar_height + bar_tips, bar_height],
+                color='black', linewidth=0.8)
+        
+        # Add text
+        text = f'p = {p_value:.4f} {sig_symbol}'
+        ax.text((start + end) * 0.5, bar_height + bar_tips, 
+                text, ha='center', va='bottom', fontsize=8)
+
+    # Get current y limits
+    current_ymin, current_ymax = ax.get_ylim()
+    bar_height = current_ymax + 0.15
+
+    # Add significant bars (p < 0.05 only)
+    for (group1_idx, group2_idx), sig_data in significance_info.items():
+        if sig_data['significance'] != 'ns':  # Only show significant comparisons
+            add_significance_bar(
+                group1_idx, 
+                group2_idx, 
+                bar_height,
+                sig_data['p-value'],
+                sig_data['significance']
+            )
+            bar_height += 0.15  # Increment height for next bar
+
+    # Adjust y-axis limits to accommodate bars
+    ax.set_ylim(current_ymin, bar_height + 0.1)
+
+    if title:
+        plt.title(title, pad=20)
+
+    if x_ticks is None:
+        ax.set_xticks([])
+        ax.spines['bottom'].set_visible(False)
+    else:
+        ax.set_xticks(range(len(x_ticks)))
+        ax.set_xticklabels(x_ticks)
+        ax.spines['bottom'].set_visible(True)
+
+    # Configure ticks and spines with thinner lines
+    ax.minorticks_off()
+    ax.tick_params(axis='both', which='minor', bottom=False, top=False, left=False, right=False)
+    ax.tick_params(axis='x', which='major', top=False)
+    ax.tick_params(axis='y', which='major', right=False, width=0.8)
+    
+    ax.spines['left'].set_linewidth(0.8)
+    ax.spines['right'].set_visible(False)
+    ax.yaxis.set_tick_params(width=0.8)
+    
+    plt.setp(ax.get_yticklabels(), weight='bold')
+    ax.set_xlabel('')
+    ax.set_ylabel('')
+    ax.yaxis.grid(False)
+    
+    sns.despine(offset=5, trim=True, bottom=(x_ticks is None), right=True)
+    plt.close()
+    
+    return fig
+
+def plot_overlap_heatmap(percent_matrix, title, ax, is_up=True):
+    # Create masks for lower triangle and diagonal
+    mask_lower = np.tril(np.ones(percent_matrix.shape), k=-1).astype(bool)
+    mask_diagonal = np.eye(percent_matrix.shape[0], dtype=bool)
+    
+    # First plot the diagonal with grey color
+    sns.heatmap(percent_matrix,
+                mask=~mask_diagonal,  # Only show diagonal
+                cmap=['lightgrey'],   # Use grey color for diagonal
+                cbar=False,
+                ax=ax)
+    
+    # Create custom colormaps from white to green/blue
+    from matplotlib.colors import LinearSegmentedColormap
+    if is_up:
+        colors = ['white', '#00441b']  # White to dark green
+        cmap = LinearSegmentedColormap.from_list('custom_green', colors)
+    else:
+        colors = ['white', '#08519c']  # White to dark blue
+        cmap = LinearSegmentedColormap.from_list('custom_blue', colors)
+    
+    # Then plot the upper triangle with data
+    sns.heatmap(percent_matrix, 
+                mask=mask_lower | mask_diagonal,  # Hide lower triangle and diagonal
+                annot=True,  # Show values in cells
+                fmt='.1f',   # Format as float with 1 decimal
+                cmap=cmap,
+                vmin=0,      # Set minimum value to 0
+                vmax=50,     # Set maximum value to 50
+                cbar_kws={'label': 'Overlap (%)', 'ticks': [0, 10, 20, 30, 40, 50]},
+                ax=ax)
+    
+    ax.set_title(title)
+    # Rotate x-axis labels for better readability
+    plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
