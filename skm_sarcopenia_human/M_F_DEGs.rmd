@@ -1,0 +1,133 @@
+##### DEG for getting a logFC for all genes in a sample wise comparitive format #####
+library(DESeq2)
+library(tidyverse)
+
+# Load data (remove outlier sample AV03)
+counts_file = "/ix/djishnu/Akanksha/datasets/bulk_RNA_mouse_liver/Trf2_Liver_WT_RawCounts.txt"
+counts_data <- read.delim(counts_file, row.names = 1) %>% 
+  select(-AV03)  # Remove AV03 column
+
+# Create sample metadata, row names of metadata are taken from column names of raw counts
+colData <- data.frame(
+  condition = factor(c("LFD_CTRL", "LFD_CTRL", "LFD_CTRL", "LFD_CTRL", "LFD_TRF2KO", "LFD_TRF2KO", "LFD_TRF2KO", "LFD_TRF2KO", "LFD_TRF2KO", "WD_CTRL", "WD_CTRL", "WD_CTRL", "WD_CTRL", "WD_CTRL", "WD_TRF2KO", "WD_TRF2KO", "WD_TRF2KO", "WD_TRF2KO", "WD_TRF2KO")),
+  row.names = colnames(counts_data))
+
+# Create DESeq object, with 4 conditions from our dataset
+dds <- DESeqDataSetFromMatrix(countData = counts_data, colData = colData, design = ~ condition)
+
+# Filter low gene counts
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+
+# Perform the DEG analysis (don't mention reference level at this stage)
+dds <- DESeq(dds)
+results_deg <- results(dds)
+
+# set the reference and experimental levels
+resultsNames(dds)
+
+# Save all DE results to files
+res_LFD_TRF2KO_vs_LFD_CTRL <- results(dds, name = "condition_LFD_TRF2KO_vs_LFD_CTRL")
+res_WD_CTRL_vs_LFD_CTRL <- results(dds, name = "condition_WD_CTRL_vs_LFD_CTRL")
+res_WD_KO_vs_WD_CTRL <- results(dds, contrast = c("condition", "WD_TRF2KO", "WD_CTRL"))
+
+# Write results to CSV files
+write.csv(res_LFD_TRF2KO_vs_LFD_CTRL, file = "/ix/djishnu/Akanksha/datasets/bulk_RNA_mouse_liver/LFD_TRF2KO_vs_LFD_CTRL_DEGs.csv")
+write.csv(res_WD_CTRL_vs_LFD_CTRL, file = "/ix/djishnu/Akanksha/datasets/bulk_RNA_mouse_liver/WD_CTRL_vs_LFD_CTRL_DEGs.csv")
+write.csv(res_WD_KO_vs_WD_CTRL, file = "/ix/djishnu/Akanksha/datasets/bulk_RNA_mouse_liver/WD_TRF2KO_vs_WD_CTRL_DEGs.csv")
+
+##### GSEA #####
+
+# order your DEG results to rank the genes
+res_LFD_TRF2KO_vs_LFD_CTRL <- res_LFD_TRF2KO_vs_LFD_CTRL[order(-res_LFD_TRF2KO_vs_LFD_CTRL$stat),]
+res_WD_CTRL_vs_LFD_CTRL <- res_WD_CTRL_vs_LFD_CTRL[order(-res_WD_CTRL_vs_LFD_CTRL$stat),]
+res_WD_KO_vs_WD_CTRL <- res_WD_KO_vs_WD_CTRL[order(-res_WD_KO_vs_WD_CTRL$stat),]
+
+# load libraries for gsea
+
+library(org.Mm.eg.db)
+library(clusterProfiler)
+
+# set your deg list 
+gene_list_LFD_KO_CTRL <- res_LFD_TRF2KO_vs_LFD_CTRL$stat
+names(gene_list_LFD_KO_CTRL) <- rownames(res_LFD_TRF2KO_vs_LFD_CTRL)
+
+gene_list_WD_LFD_CTRL <- res_WD_CTRL_vs_LFD_CTRL$stat
+names(gene_list_WD_LFD_CTRL) <- rownames(res_WD_CTRL_vs_LFD_CTRL)
+
+gene_list_WD_KO_CTRL <- res_WD_KO_vs_WD_CTRL$stat
+names(gene_list_WD_KO_CTRL) <- rownames(res_WD_KO_vs_WD_CTRL)
+
+# Define the GO term of interest
+lipid_biosyn_go_id <- "GO:0008610"
+lipid_stor_go_id <- "GO:0019915"
+lipid_transport <- "GO:0006869"
+
+# Extract gene symbols associated with the GO term
+lipid_biosyn_go_genes <- AnnotationDbi::select(org.Mm.eg.db, keys = lipid_biosyn_go_id, 
+                                  keytype = "GOALL", columns = "SYMBOL")
+lipid_biosyn_go_gene_set <- unique(lipid_biosyn_go_genes$SYMBOL)
+lipid_biosyn_go_gene_set <- lipid_biosyn_go_gene_set[!is.na(lipid_biosyn_go_gene_set)]  # Remove NAs
+
+lipid_stor_go_genes <- AnnotationDbi::select(org.Mm.eg.db, keys = lipid_stor_go_id, 
+                                  keytype = "GOALL", columns = "SYMBOL")
+lipid_stor_go_gene_set <- unique(lipid_stor_go_genes$SYMBOL)
+lipid_stor_go_gene_set <- lipid_stor_go_gene_set[!is.na(lipid_stor_go_gene_set)]  # Remove NAs
+
+lipid_trans_go_genes <- AnnotationDbi::select(org.Mm.eg.db, keys = lipid_transport, 
+                                  keytype = "GOALL", columns = "SYMBOL")
+lipid_trans_go_gene_set <- unique(lipid_trans_go_genes$SYMBOL)
+lipid_trans_go_gene_set <- lipid_trans_go_gene_set[!is.na(lipid_trans_go_gene_set)]  # Remove NAs
+
+```{r}
+# List available GO IDs
+go_keys <- keys(org.Mm.eg.db, keytype = "GOALL")
+head(go_keys)  # Check if your GO ID is present
+
+# Check if the specific GO ID is in the database
+"GO:0008610" %in% go_keys
+"GO:0019915" %in% go_keys
+"GO:0006869" %in% go_keys
+```
+# Convert gene set to TERM2GENE format for each pathway
+term2gene_biosyn_df <- data.frame(term = lipid_biosyn_go_id, 
+                                  gene = lipid_biosyn_go_gene_set)
+term2gene_stor_df <- data.frame(term = lipid_stor_go_id, 
+                                gene = lipid_stor_go_gene_set)
+term2gene_trans_df <- data.frame(term = lipid_transport, 
+                                 gene = lipid_trans_go_gene_set)
+# Combine all three pathways into a single TERM2GENE dataframe
+term2gene_df <- rbind(term2gene_biosyn_df, term2gene_stor_df, term2gene_trans_df)
+
+# Run GSEA for specific gene set and specific gene list
+gsea_result <- GSEA(gene_list_WD_LFD_CTRL, 
+                    TERM2GENE = term2gene_df, 
+                    minGSSize = 5, 
+                    maxGSSize = 700, 
+                    pvalueCutoff = 0.5)  # Adjust p-value threshold
+# View results
+as.data.frame(gsea_result)
+```{r}
+# Plot GSEA result
+library(enrichplot)
+
+# Extract pathway name and p-value
+current_pathway <- gsea_result@result$ID[2]
+pathway_name <- gsea_result@result$Description[gsea_result@result$ID == current_pathway]
+pval <- gsea_result@result$p.adjust[gsea_result@result$ID == current_pathway]
+nes <- gsea_result@result$NES[gsea_result@result$ID == current_pathway]
+
+# Generate enhanced GSEA plot
+gsea_plot <- gseaplot2(gsea_result, 
+          geneSetID = current_pathway, 
+          title = paste0("WD CTRL vs LFD CTRL", "\n", pathway_name," - Lipid Storage", " Adj p-value: ", signif(pval, 3)),
+          color = "green",
+          base_size = 12)  # Adjust font size for better readability
+gsea_plot
+```
+
+```{r}
+png("/ix/djishnu/Akanksha/datasets/bulk_RNA_mouse_liver/gsea_WD_LFD_CTRL_lipid_transport.png", width = 800, height = 600)
+print(gsea_plot)
+dev.off()
+```
