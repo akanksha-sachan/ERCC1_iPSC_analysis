@@ -1,6 +1,11 @@
 import pandas as pd
 from collections import defaultdict
+from scipy.stats import ttest_ind
+from itertools import combinations
 import re
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
 
 def read_series_matrix(path):
     with open(path, 'r') as f:
@@ -205,32 +210,6 @@ def plot_geneset_scores_scatter(scores_df, category_col="disease_state", palette
     plt.tight_layout()
     plt.show()
 
-def calculate_pairwise_significance(data, x_var, y_var):
-    """
-    Perform pairwise t-tests and return significance annotations.
-    """
-    results = {}
-    groups = data[x_var].unique()
-    group_indices = {group: i for i, group in enumerate(groups)}
-    
-    for group1, group2 in combinations(groups, 2):
-        values1 = data[data[x_var] == group1][y_var]
-        values2 = data[data[x_var] == group2][y_var]
-        stat, p = ttest_ind(values1, values2, equal_var=False)
-        if p < 0.001:
-            sig = '***'
-        elif p < 0.01:
-            sig = '**'
-        elif p < 0.05:
-            sig = '*'
-        else:
-            sig = 'ns'
-        results[(group_indices[group1], group_indices[group2])] = {
-            "p-value": p,
-            "significance": sig
-        }
-    return results
-
 def plot_geneset_score_violin_box(scores_df, category_col="disease_state", score_col="geneset_score", palette=None, title=None):
     """
     Plot geneset scores across categories using combined violin-box-strip plot.
@@ -242,11 +221,6 @@ def plot_geneset_score_violin_box(scores_df, category_col="disease_state", score
     - palette: dict of colors for each category (REQUIRED)
     - title: optional plot title
     """
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    import numpy as np
-    from scipy.stats import ttest_ind
-    from itertools import combinations
 
     assert palette is not None, "You must pass a color palette dictionary for consistent category coloring."
 
