@@ -1,15 +1,14 @@
 import os
 import sys
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-import scienceplots
+import matplotlib.pyplot as plt
 from statannotations import Annotator
 
 def calculate_senescence_score(data, up_genes=None, down_genes=None):
     """
-    Calculate senescence signature scores for each sample based on DEGs from gene-sets
+    Calculate senescence signature scores for each sample based on gene-sets with directionality
     """
     if up_genes is None and down_genes is None:
         raise ValueError("At least one of up_genes or down_genes must be provided")
@@ -67,7 +66,7 @@ def calculate_senescence_score(data, up_genes=None, down_genes=None):
     return scores_df
 
 
-def map_sample_to_category(sample_name):
+def map_sample_to_category_trf2(sample_name):
     """
     Map sample names to their experimental categories
     """
@@ -79,6 +78,16 @@ def map_sample_to_category(sample_name):
         return "Ctrl Western diet"
     elif sample_name in ["AV16", "AV17", "AV18", "AV19", "AV20"]:
         return "Trf2 KO Western diet"
+    return None
+
+def map_sample_to_category_ercc1(sample_name):
+    """
+    Map sample names to their experimental categories
+    """
+    if sample_name in ["AV01", "AV02", "AV03", "AV04", "AV05", "AV06", "AV07"]:
+        return "WT"
+    elif sample_name in ["AV08", "AV09", "AV10", "AV11", "AV12", "AV13", "AV14"]:
+        return "Ercc1 LKO"
     return None
 
 def permutation_test(group1, group2, n_permutations=10000):
@@ -164,10 +173,10 @@ def create_overlap_data(genesets):
     
     return percent_matrix, count_matrix
 
-################### PLotting ###################
+################### Plotting ###################
 
 # Set global style parameters
-plt.style.use(['science', 'no-latex'])  # Requires SciencePlots package
+plt.style.use(['ggplot'])  # Requires SciencePlots package
 plt.rcParams.update({
     'font.family': 'Arial',
     'font.size': 9,
