@@ -330,7 +330,7 @@ def plot_scores_with_significance(
     plt.tight_layout(pad=1.5)
     plt.show()
 
-def plot_violin_box_combo(data, x_var, y_var, title=None, x_ticks=None, palette=None):
+def plot_violin_box_combo(data, x_var, y_var, title=None, x_ticks=None, palette=None, rotation=45):
     """
     Create a combined violin-box plot with consistent colors for all elements
     """
@@ -469,7 +469,8 @@ def plot_violin_box_combo(data, x_var, y_var, title=None, x_ticks=None, palette=
         ax.spines['bottom'].set_visible(False)
     else:
         ax.set_xticks(range(len(x_ticks)))
-        ax.set_xticklabels(x_ticks)
+        ax.set_xticklabels(x_ticks, rotation=rotation, ha='right')
+        plt.setp(ax.get_xticklabels(), rotation=rotation, ha='right')  # Add this line
         ax.spines['bottom'].set_visible(True)
 
     # Configure ticks and spines with thinner lines
@@ -488,6 +489,11 @@ def plot_violin_box_combo(data, x_var, y_var, title=None, x_ticks=None, palette=
     ax.yaxis.grid(False)
     
     sns.despine(offset=5, trim=True, bottom=(x_ticks is None), right=True)
+    
+    # Force rotation of x-tick labels
+    if x_ticks is not None:
+        plt.setp(ax.get_xticklabels(), rotation=rotation, ha='right')
+    
     plt.close()
     
     return fig

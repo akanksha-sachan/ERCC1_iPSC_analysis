@@ -87,6 +87,22 @@ head(go_keys)  # Check if your GO ID is present
 "GO:0019915" %in% go_keys
 "GO:0006869" %in% go_keys
 ```
+custom_sets <- list(
+  hepatocyte_senescence = c("PLIN2","CIDEC","DGAT1","DGAT2","ACSL1","CIDEA")
+)
+
+## (Optional) If you want nicer names on plots:
+term2name_df <- data.frame(
+  term = names(custom_sets),
+  name = c("Hepatocyte Senescence"),
+  stringsAsFactors = FALSE
+)
+
+## Build TERM2GENE from the lists
+term2gene_df <- do.call(rbind, lapply(names(custom_sets), function(tnm) {
+  data.frame(term = tnm, gene = unique(custom_sets[[tnm]]), stringsAsFactors = FALSE)
+}))
+
 # Convert gene set to TERM2GENE format for each pathway
 term2gene_biosyn_df <- data.frame(term = lipid_biosyn_go_id, 
                                   gene = lipid_biosyn_go_gene_set)
